@@ -1,13 +1,11 @@
-# geminimain.py
-
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from scipy.spatial.distance import euclidean, pdist, squareform
-from scipy.stats import gaussian_kde, entropy
-import matplotlib.pyplot as plt
+from scipy.stats import gaussian_kde
 import logging
 
 # Configure logging
@@ -49,7 +47,7 @@ def compute_entropy_kde(data):
 # Compute curvature using PCA explained variance
 def compute_curvature(data, n_components=10):
     """Computes curvature using PCA explained variance."""
-    pca = PCA(n_components=min(data.shape, data.shape))
+    pca = PCA(n_components=min(data.shape[1], n_components))
     pca.fit(data)
     return np.sum(pca.explained_variance_ratio_[:n_components])
 
@@ -64,10 +62,10 @@ def compute_viscosity(initial_entropy, compressed_entropy, initial_curvature, de
     return (initial_entropy - compressed_entropy) / (initial_entropy * (1 + deformation) * (1 + 0.1 * (2 - initial_curvature)))
 
 # Run GEMINI analysis
-def run_gemini_analysis(datasets, n_trials=5, perplexity_values=, pca_components=10):
+def run_gemini_analysis(datasets, n_trials=5, perplexity_values=[5, 10, 30, 50, 100], pca_components=10):
     """Runs the GEMINI analysis with various experiments."""
 
-    all_results =
+    all_results = []
 
     for trial in range(n_trials):
         logging.info(f"Starting trial {trial + 1}/{n_trials}")
@@ -98,7 +96,24 @@ def run_gemini_analysis(datasets, n_trials=5, perplexity_values=, pca_components
                 })
 
             # --- Hysteresis ---
-            #... (Similar to Shear Rate Dependence, but with increasing and then decreasing perplexity values)
+            for i, perplexity in enumerate(perplexity_values + perplexity_values[::-1]):  # Forward & backward pass
+                tsne = TSNE(n_components=2, perplexity=perplexity, random_state=trial)
+                compressed_data = tsne.fit_transform(data_scaled)
+
+                initial_entropy = compute_entropy_kde(data_scaled)
+                compressed_entropy = compute_entropy_kde(compressed_data)
+                initial_curvature = compute_curvature(data_scaled, n_components=2)
+                deformation = compute_deformation(data_scaled, compressed_data)
+                viscosity = compute_viscosity(initial_entropy, compressed_entropy, initial_curvature, deformation)
+
+                all_results.append({
+                    "Trial": trial,
+                    "Dataset": dataset_name,
+                    "Experiment": "Hysteresis",
+                    "Step": i + 1,
+                    "Perplexity": perplexity,
+                    "Viscosity Score": viscosity
+                })
 
             # --- Viscoelasticity ---
             pca = PCA(n_components=pca_components)
@@ -121,5 +136,21 @@ if __name__ == "__main__":
     datasets = generate_datasets()
     results_df = run_gemini_analysis(datasets)
 
-    # Analyze and visualize the results
-    #... (Group by experiment, dataset, etc., and create plots as needed)
+    # Print the raw results
+    print(results_df)
+
+    # Group and analyze results
+    analysis = results_df.groupby(["Experiment", "Dataset"])["Viscosity Score"].agg(["mean", "std"])
+
+    # Plot the results
+    plt.figure(figsize=(12, 6))
+    for experiment in results_df["Experiment"].unique():
+        exp_data = results_df[results_df["Experiment"] == experiment]
+        plt.scatter(exp_data["Perplexity"], exp_data["Viscosity Score"], label=experiment, alpha=0.7)
+
+    plt.xlabel("Perplexity / PCA Components")
+    plt.ylabel("Viscosity Score")
+    plt.title("GEMINI Analysis: Viscosity vs. Shear, Hysteresis, and Viscoelasticity")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
